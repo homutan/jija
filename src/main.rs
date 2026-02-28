@@ -8,7 +8,7 @@ use std::{
 use axum::{
     Router,
     body::{Body, Bytes},
-    http::{HeaderMap, Request as IncomingRequest},
+    http::{HeaderMap, HeaderName, Request as IncomingRequest},
     middleware::{self, Next},
     response::{IntoResponse, Response as OutgoingResponse},
     routing::post,
@@ -74,7 +74,7 @@ impl HttpClient {
         let mut request = self
             .http_client
             .post(url)
-            .bearer_auth(&self.config.auth_key.expose_secret())
+            .header("x-api-key", self.config.auth_key.expose_secret())
             .body(body);
 
         for (name, value) in headers {
