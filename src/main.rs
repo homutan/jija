@@ -196,14 +196,24 @@ async fn log_request(request: IncomingRequest<Body>, next: Next) -> OutgoingResp
 async fn authorize(
     request: IncomingRequest<Body>, next: Next, expected_key: SecretString,
 ) -> Result<OutgoingResponse, Error> {
-    let auth_header = request
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok());
+    let headers = request.headers();
 
-    let provided_key = auth_header
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .or_else(|| auth_header);
+    let provided_key = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| {
+            let h = h.trim();
+            h.strip_prefix("Bearer ")
+                .or_else(|| h.strip_prefix("bearer "))
+                .or(Some(h))
+        })
+        .or_else(|| {
+            headers
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+        });
 
     match provided_key {
         Some(key) if key == expected_key.expose_secret() => Ok(next.run(request).await),
