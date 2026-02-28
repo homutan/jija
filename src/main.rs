@@ -19,7 +19,7 @@ use reqwest::{
     header::AUTHORIZATION,
 };
 use secrecy::{ExposeSecret as _, SecretString};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, signal};
 use tracing::Instrument as _;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -230,7 +230,7 @@ async fn main() {
 
 async fn run() -> eyre::Result<()> {
     color_eyre::install()?;
-    dotenvy::dotenv()?;
+    let _ = dotenvy::dotenv();
 
     let anthropic_config = ProviderConfig {
         base_url: url_from_env(ANTHROPIC_BASE_URL).context(ANTHROPIC_BASE_URL)?,
@@ -298,7 +298,36 @@ async fn run() -> eyre::Result<()> {
 
     tracing::info!("Server listening at {}", tcp_listener.local_addr()?);
 
-    axum::serve(tcp_listener, app).await.map_err(Into::into)
+    axum::serve(tcp_listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .map_err(Into::into)
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler")
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+
+    tracing::info!("Shutdown signal received");
 }
 
 fn query_to_str(query: &HashMap<String, String>) -> Option<String> {
