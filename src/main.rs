@@ -71,11 +71,16 @@ impl HttpClient {
         let mut url = self.config.base_url.join(path)?;
         url.set_query(query);
 
-        let mut request = self
-            .http_client
-            .post(url)
-            .header("x-api-key", self.config.auth_key.expose_secret())
-            .body(body);
+        let request = self.http_client.post(url);
+
+        let mut request = if path.contains("anthropic") {
+            request.header("x-api-key", self.config.auth_key.expose_secret())
+        } else if path.contains("openai") {
+            request.bearer_auth(self.config.auth_key.expose_secret())
+        } else {
+            request
+        }
+        .body(body);
 
         for (name, value) in headers {
             if HttpClient::ALLOWED_OUTGOING_HEADERS.contains(&name.as_str()) {
