@@ -39,9 +39,16 @@ const OPENAI_BASE_URL: &str = "OPENAI_BASE_URL";
 const OPENAI_AUTH_KEY: &str = "OPENAI_AUTH_KEY";
 
 #[derive(Debug, Clone)]
+pub enum Provider {
+    Anthropic,
+    OpenAI,
+}
+
+#[derive(Debug, Clone)]
 struct ProviderConfig {
     base_url: Url,
     auth_key: SecretString,
+    provider: Provider,
 }
 
 impl Display for ProviderConfig {
@@ -73,12 +80,10 @@ impl HttpClient {
 
         let request = self.http_client.post(url);
 
-        let mut request = if path.contains("anthropic") {
-            request.header("x-api-key", self.config.auth_key.expose_secret())
-        } else if path.contains("openai") {
-            request.bearer_auth(self.config.auth_key.expose_secret())
-        } else {
-            request
+        let auth_key = self.config.auth_key.expose_secret();
+        let mut request = match self.config.provider {
+            Provider::Anthropic => request.header("x-api-key", auth_key),
+            Provider::OpenAI => request.bearer_auth(auth_key),
         }
         .body(body);
 
@@ -242,6 +247,7 @@ async fn run() -> eyre::Result<()> {
         auth_key: std::env::var(ANTHROPIC_AUTH_KEY)
             .context(ANTHROPIC_AUTH_KEY)?
             .into(),
+        provider: Provider::Anthropic,
     };
 
     tracing::info!("Using Anthropic as: {anthropic_config}");
@@ -251,6 +257,7 @@ async fn run() -> eyre::Result<()> {
         auth_key: std::env::var(OPENAI_AUTH_KEY)
             .context(OPENAI_AUTH_KEY)?
             .into(),
+        provider: Provider::OpenAI,
     };
 
     tracing::info!("Using OpenAI as: {openai_config}");
