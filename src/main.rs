@@ -64,7 +64,8 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    const ALLOWED_OUTGOING_HEADERS: [&str; 5] = [
+    const ALLOWED_OUTGOING_HEADERS: [&str; 6] = [
+        "cache-control",
         "content-type",
         "anthropic-version",
         "anthropic-beta",
