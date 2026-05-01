@@ -14,10 +14,7 @@ use axum::{
     routing::post,
 };
 use color_eyre::eyre::{self, Context};
-use reqwest::{
-    Client as ReqwestClient, RequestBuilder, Response as IncomingResponse, StatusCode, Url,
-    header::AUTHORIZATION,
-};
+use reqwest::{Client as ReqwestClient, RequestBuilder, StatusCode, Url, header::AUTHORIZATION};
 use secrecy::{ExposeSecret as _, SecretString};
 use tokio::{net::TcpListener, signal};
 use tracing::Instrument as _;
@@ -103,10 +100,13 @@ impl HttpClient {
         let mut url = self.config.base_url.join(path)?;
         url.set_query(query);
 
-        let mut request = self
-            .http_client
-            .get(url)
-            .bearer_auth(&self.config.auth_key.expose_secret());
+        let request = self.http_client.get(url);
+
+        let auth_key = self.config.auth_key.expose_secret();
+        let mut request = match self.config.provider {
+            Provider::Anthropic => request.header("x-api-key", auth_key),
+            Provider::OpenAI => request.bearer_auth(auth_key),
+        };
 
         for (name, value) in headers {
             if HttpClient::ALLOWED_OUTGOING_HEADERS.contains(&name.as_str()) {
@@ -123,10 +123,13 @@ impl HttpClient {
         let mut url = self.config.base_url.join(path)?;
         url.set_query(query);
 
-        let mut request = self
-            .http_client
-            .delete(url)
-            .bearer_auth(&self.config.auth_key.expose_secret());
+        let request = self.http_client.delete(url);
+
+        let auth_key = self.config.auth_key.expose_secret();
+        let mut request = match self.config.provider {
+            Provider::Anthropic => request.header("x-api-key", auth_key),
+            Provider::OpenAI => request.bearer_auth(auth_key),
+        };
 
         for (name, value) in headers {
             if HttpClient::ALLOWED_OUTGOING_HEADERS.contains(&name.as_str()) {
@@ -363,54 +366,56 @@ fn query_to_str(query: &HashMap<String, String>) -> Option<String> {
     )
 }
 
-fn proxy_response(response: IncomingResponse) -> eyre::Result<OutgoingResponse> {
-    const ALLOWED_INCOMING_HEADERS: [&str; 16] = [
-        "content-type",
-        "content-length",
-        "cache-control",
-        // anthropic ratelimits
-        "anthropic-ratelimit-requests-limit",
-        "anthropic-ratelimit-requests-remaining",
-        "anthropic-ratelimit-requests-reset",
-        "anthropic-ratelimit-tokens-limit",
-        "anthropic-ratelimit-tokens-remaining",
-        "anthropic-ratelimit-tokens-reset",
-        // openai ratelimits
-        "x-ratelimit-limit-requests",
-        "x-ratelimit-limit-tokens",
-        "x-ratelimit-remaining-requests",
-        "x-ratelimit-remaining-tokens",
-        "x-ratelimit-reset-requests",
-        "x-ratelimit-reset-tokens",
-        "x-request-id",
-    ];
-
-    let status = response.status();
-
-    let mut headers = HeaderMap::new();
-
-    for (name, value) in response.headers() {
-        if ALLOWED_INCOMING_HEADERS.contains(&name.as_str()) {
-            headers.insert(name, value.clone());
-        }
-    }
-
-    let body = Body::from_stream(response.bytes_stream());
-
-    Ok((status, headers, body).into_response())
-}
-
 mod handlers {
     use std::collections::HashMap;
 
     use axum::{
-        body::Bytes,
+        body::{Body, Bytes},
         extract::{Path, Query, State},
         http::HeaderMap,
-        response::Response as OutgoingResponse,
+        response::{IntoResponse as _, Response as OutgoingResponse},
     };
+    use color_eyre::eyre;
+    use reqwest::Response as IncomingResponse;
 
-    use crate::{Error, HttpClient, proxy_response, query_to_str};
+    use crate::{Error, HttpClient, query_to_str};
+
+    fn proxy_response(response: IncomingResponse) -> eyre::Result<OutgoingResponse> {
+        const ALLOWED_INCOMING_HEADERS: [&str; 16] = [
+            "content-type",
+            "content-length",
+            "cache-control",
+            // anthropic ratelimits
+            "anthropic-ratelimit-requests-limit",
+            "anthropic-ratelimit-requests-remaining",
+            "anthropic-ratelimit-requests-reset",
+            "anthropic-ratelimit-tokens-limit",
+            "anthropic-ratelimit-tokens-remaining",
+            "anthropic-ratelimit-tokens-reset",
+            // openai ratelimits
+            "x-ratelimit-limit-requests",
+            "x-ratelimit-limit-tokens",
+            "x-ratelimit-remaining-requests",
+            "x-ratelimit-remaining-tokens",
+            "x-ratelimit-reset-requests",
+            "x-ratelimit-reset-tokens",
+            "x-request-id",
+        ];
+
+        let status = response.status();
+
+        let mut headers = HeaderMap::new();
+
+        for (name, value) in response.headers() {
+            if ALLOWED_INCOMING_HEADERS.contains(&name.as_str()) {
+                headers.insert(name, value.clone());
+            }
+        }
+
+        let body = Body::from_stream(response.bytes_stream());
+
+        Ok((status, headers, body).into_response())
+    }
 
     pub async fn post(
         http_client: State<HttpClient>, Path(path): Path<String>,
