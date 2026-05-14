@@ -82,22 +82,10 @@ impl HttpClient {
             Provider::OpenAI { base_url, .. } => base_url.join(path)?,
         };
 
-        fn query_to_str(query: &HashMap<String, String>) -> Option<String> {
-            if query.is_empty() {
-                return None;
-            }
-
-            let query = query
-                .into_iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join("&");
-
-            Some(query)
-        }
-
         // К базовому URL добавляется query в правильном формате
-        url.set_query(query_to_str(query).as_deref());
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query.iter());
+        }
 
         // Собирается новый запрос
         let request = self.http_client.request(method, url);
